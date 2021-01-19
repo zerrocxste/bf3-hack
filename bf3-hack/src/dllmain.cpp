@@ -690,9 +690,9 @@ LPVOID hook_dx11()
 		return 0;
 	}
 
-	void** pVTableSwapChain = *reinterpret_cast<void***>(swapchain);
+	void** vtable_swapchain = *(void***)swapchain;
 
-	LPVOID present_address = reinterpret_cast<LPVOID>(pVTableSwapChain[8]);
+	LPVOID present_address = vtable_swapchain[8];
 
 	if (MH_CreateHook(present_address, &present_hooked, (LPVOID*)&pPresent) != MH_OK)
 	{
@@ -744,6 +744,12 @@ void hack_thread(HMODULE module)
 
 	LPVOID present_address = hook_dx11();
 
+	if (present_address == NULL)
+	{
+		std::cout << __FUNCTION__ << " failed hook dx11\n";
+		FreeLibraryAndExitThread(module, 1);
+	}
+
 	hook_wndproc();
 
 	while (true)
@@ -763,7 +769,7 @@ void hack_thread(HMODULE module)
 
 	MH_Uninitialize();
 
-	std::cout << "free library...\n";
+	std::cout << __FUNCTION__ << " free library...\n";
 
 	FreeLibraryAndExitThread(module, 0);
 }
