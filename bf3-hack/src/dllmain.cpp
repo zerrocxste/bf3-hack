@@ -18,9 +18,21 @@ LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 using fPresent = HRESULT(WINAPI*)(IDXGISwapChain*, UINT, UINT);
 fPresent pPresent = NULL;
 
+using fResizeBuffers = HRESULT(WINAPI*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
+fResizeBuffers pResizeBuffers = NULL;
+
 WNDPROC pWndProc = NULL;
 
-HWND hwndGame;
+HWND hwndGame = NULL;
+
+LPVOID pPresentAddress = NULL;
+LPVOID pResizeBuffersAddress = NULL;
+
+ID3D11Device* device = nullptr;
+ID3D11DeviceContext* context = nullptr;
+ID3D11RenderTargetView* render_view = nullptr;
+
+static bool renderview_lost = true;
 
 namespace vars
 {
@@ -33,10 +45,13 @@ namespace vars
 		bool box;
 		bool name;
 		bool health;
+		float enemy_color[3];
+		float teammate_color[3];
 	}
 	void load_default_settings()
 	{
-
+		visuals::enemy_color[0] = 1.f;
+		visuals::teammate_color[2] = 1.f;
 	}
 }
 
@@ -303,12 +318,12 @@ namespace drawing
 		AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + h), color, rounding);
 	}
 
-	void DrawEspBox(float x, float y, float w, float h, float r, float g, float b, float a)
+	void DrawEspBox(float x, float y, float w, float h, const ImColor& color)
 	{
 		if (vars::visuals::box == false)
 			return;
 
-		DrawBox(x, y, w, h, ImColor(r, g, b, a));
+		DrawBox(x, y, w, h, color);
 	}
 
 	enum
@@ -381,7 +396,7 @@ namespace drawing
 		ImFont* Font = ImGui::GetIO().Fonts->Fonts[0];
 		ImVec2 text_size = Font->CalcTextSizeA(Font->FontSize, FLT_MAX, 0, "");
 
-		AddText(x + w / 2.f, y - text_size.y - 2.f, ImColor(1.f, 1.f, 1.f, col.Value.w), FL_CENTER_X, u8"%s", pcszPlayerName);
+		AddText(x + w / 2.f, y - text_size.y - 2.f, ImColor(col.Value.x, col.Value.y, col.Value.z, col.Value.w), FL_CENTER_X, u8"%s", pcszPlayerName);
 	}
 
 	void DrawHealth(float x, float y, float h, float health, float max_health, ImColor col)
@@ -394,9 +409,9 @@ namespace drawing
 		const auto size = h / max_health * health;
 		const auto thickness = 2.f;
 
-		DrawFillArea(x - thickness - 1.9f, y + h, thickness, -size, ImColor(0.f, 1.f, 0.f, col.Value.w));
+		DrawFillArea(x - thickness - 1.9f, y + h, thickness, -size, ImColor(col.Value.x, col.Value.y, col.Value.z, col.Value.w));
 
-		DrawBox(x - thickness - 2.9f, y - 1.f, thickness + 2.f, h + 2.f, ImColor(0.f, 0.f, 0.f, col.Value.w));
+		//DrawBox(x - thickness - 2.9f, y - 1.f, thickness + 2.f, h + 2.f, ImColor(0.f, 0.f, 0.f, col.Value.w));
 	}
 }
 
@@ -410,7 +425,7 @@ HRESULT WINAPI wndproc_hooked(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
 	static auto once = []()
 	{
-		std::cout << __FUNCTION__ << " first called\n";
+		std::cout << __FUNCTION__ << " > first called!" << std::endl;
 		return true;
 	}();
 
@@ -423,12 +438,7 @@ HRESULT WINAPI wndproc_hooked(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 	return CallWindowProc(pWndProc, hWnd, Msg, wParam, lParam);
 }
 
-IDXGISwapChain* swapchain = nullptr;
-ID3D11Device* device = nullptr;
-ID3D11DeviceContext* context = nullptr;
-ID3D11RenderTargetView* render_view = nullptr;
-
-void inittialize_imgui()
+void initialize_imgui()
 {
 	ImGui::CreateContext();
 	ImGui::StyleColorsClassic();
@@ -462,10 +472,10 @@ void inittialize_imgui()
 	style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.78f, 0.78f, 0.78f, 1.f);
 	style.Colors[ImGuiCol_WindowBg] = ImColor(220, 220, 220, 0.7 * 255);
 	style.Colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-	style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.40f, 0.40f, 0.80f, 0.20f);
+	style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.75f, 0.75f, 0.75f, 0.53f);
 	style.Colors[ImGuiCol_MenuBarBg] = ImVec4(0.40f, 0.40f, 0.55f, 0.80f);
 	style.Colors[ImGuiCol_Border] = ImVec4(0.72f, 0.72f, 0.72f, 0.70f);
-	style.Colors[ImGuiCol_TitleBg] = ImVec4(1.00f, 1.00f, 1.00f, 0.83f);
+	style.Colors[ImGuiCol_TitleBg] = ImVec4(0.77f, 0.77f, 0.77f, 0.83f);
 	style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.75f, 0.75f, 0.75f, 0.87f);
 	style.Colors[ImGuiCol_Text] = ImVec4(0.13f, 0.13f, 0.13f, 1.00f);
 	style.Colors[ImGuiCol_ChildBg] = ImVec4(0.72f, 0.72f, 0.72f, 0.76f);
@@ -498,6 +508,15 @@ namespace functions
 			if (vars::visuals::enable == false)
 				return;
 
+			DWORD local_player = memory_utils::read<DWORD>({ memory_utils::get_base_address(), 0x1EF25C4, 0x48, 0x4, 0x68 });
+
+			if (local_player == NULL)
+				return;
+
+			char* my_name = memory_utils::read_string({ local_player, 0x28 });
+
+			int my_team = memory_utils::read<int>({ local_player, 0x31C });
+
 			DWORD entity_list = memory_utils::read<DWORD>({ memory_utils::get_base_address(), 0x1EF25C4, 0x48, 0x4, 0x6C });
 
 			if (entity_list == NULL)
@@ -510,17 +529,19 @@ namespace functions
 				if (entity == NULL)
 					continue;
 
-				char* name = memory_utils::read_string({ entity,  0x28 });
+				char* name = memory_utils::read_string({ entity, 0x28 });
 
-				if (name == NULL /*|| name == my_name*/)
+				if (name == NULL || strcmp(name, my_name) == 0)
 					continue;
 
 				int team = memory_utils::read<int>({ entity, 0x31C });
 
-				auto col = team == 1 ? ImColor(1.f, 0.f, 0.f) : ImColor(0.f, 0.f, 1.f);
+				auto col = team == my_team ? 
+					ImColor(vars::visuals::teammate_color[0], vars::visuals::teammate_color[1], vars::visuals::teammate_color[2])
+						: ImColor(vars::visuals::enemy_color[0], vars::visuals::enemy_color[1], vars::visuals::enemy_color[2]);
 
-				/*if (vars::visuals::teammates == false && team == my_team)
-					continue;*/
+				if (vars::visuals::teammates == false && team == my_team)
+					continue;
 
 				DWORD player_entity = memory_utils::read<DWORD>({ entity, 0x3D8 });
 
@@ -532,28 +553,35 @@ namespace functions
 				if (health <= 0)
 					continue;
 
-				DWORD entity_player_transform = memory_utils::read<DWORD>({ player_entity, 0x24C });
+				int position_type = memory_utils::read<int>({ player_entity, 0x304 });
 
-				if (entity_player_transform == NULL)
-					continue;
+				float origin_bottom[3];
+				origin_bottom[0] = memory_utils::read<float>({ player_entity, 0x2F0 });
+				origin_bottom[1] = memory_utils::read<float>({ player_entity, 0x2F4 });
+				origin_bottom[2] = memory_utils::read<float>({ player_entity, 0x2F8 });
 
-				float origin_bot[3];
-				origin_bot[0] = memory_utils::read<float>({ entity_player_transform, 0x20 });
-				origin_bot[1] = memory_utils::read<float>({ entity_player_transform, 0x24 });
-				origin_bot[2] = memory_utils::read<float>({ entity_player_transform, 0x28 });
+				float origin_top[3] = { origin_bottom[0], origin_bottom[1], origin_bottom[2] };
 
-				float origin_top[3] = { origin_bot[0], origin_bot[1], origin_bot[2] };
-				origin_top[1] += 1.5f;
+				if (position_type == 2)
+					origin_top[1] += 0.4f;
+				else if (position_type == 1)
+					origin_top[1] += 1.2f;
+				else
+					origin_top[1] += 1.5f;
 				
 				float out_bot[2], out_top[2];
-				if (game_utils::WorldToScreen(origin_bot, out_bot) && game_utils::WorldToScreen(origin_top, out_top))
+				if (game_utils::WorldToScreen(origin_bottom, out_bot) && game_utils::WorldToScreen(origin_top, out_top))
 				{
 					float h = out_bot[1] - out_top[1];
 					float w = h / 2;
 					float x = out_bot[0] - w / 2;
 					float y = out_top[1];
 
-					drawing::DrawEspBox(x, y, w, h, col.Value.x, col.Value.y, col.Value.z, 1.f);
+					drawing::DrawEspBox(x, y, w, h, col);
+
+					drawing::DrawName(name, x, y, w, ImColor(1.f, 1.f, 1.f));
+
+					drawing::DrawHealth(x, y, h, health, 100.f, ImColor(0.f, 1.f, 0.f));
 				}
 			}
 		}
@@ -581,13 +609,15 @@ void begin_scene()
 	if (vars::menu_open)
 	{
 		ImGui::GetIO().MouseDrawCursor = true;
-		ImGui::Begin("test");
+		ImGui::Begin("test", &vars::menu_open);
 		ImGui::BeginChild("visuals", ImVec2(), true);
 		ImGui::Checkbox("Enable", &vars::visuals::enable);
 		ImGui::Checkbox("Teammates", &vars::visuals::teammates);
 		ImGui::Checkbox("Box", &vars::visuals::box);
 		ImGui::Checkbox("Name", &vars::visuals::name);
 		ImGui::Checkbox("Health", &vars::visuals::health);
+		ImGui::ColorEdit3("Enemy color", vars::visuals::enemy_color);
+		ImGui::ColorEdit3("Teammate color", vars::visuals::teammate_color);
 		ImGui::EndChild();
 		ImGui::End();
 	}
@@ -618,7 +648,7 @@ void begin_scene()
 
 HRESULT WINAPI present_hooked(IDXGISwapChain* pChain, UINT SyncInterval, UINT Flags)
 {
-	static auto once = [pChain, SyncInterval, Flags]()
+	if (renderview_lost)
 	{
 		if (SUCCEEDED(pChain->GetDevice(__uuidof(ID3D11Device), (void**)&device)))
 		{
@@ -629,10 +659,15 @@ HRESULT WINAPI present_hooked(IDXGISwapChain* pChain, UINT SyncInterval, UINT Fl
 			device->CreateRenderTargetView(pBackBuffer, NULL, &render_view);
 			pBackBuffer->Release();
 
-			inittialize_imgui();
-
-			std::cout << __FUNCTION__ << " first called!" << std::endl;
+			std::cout << __FUNCTION__ << " > renderview successfully received!" << std::endl;
+			renderview_lost = false;
 		}
+	}
+
+	static auto once = [pChain, SyncInterval, Flags]()
+	{
+		initialize_imgui();
+		std::cout << __FUNCTION__ << " > first called!" << std::endl;
 		return true;
 	}();
 
@@ -643,7 +678,26 @@ HRESULT WINAPI present_hooked(IDXGISwapChain* pChain, UINT SyncInterval, UINT Fl
 	return pPresent(pChain, SyncInterval, Flags);
 }
 
-LPVOID hook_dx11()
+HRESULT WINAPI resizebuffers_hooked(IDXGISwapChain* pChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT Flags)
+{
+	static auto once = []()
+	{
+		std::cout << __FUNCTION__ << " > first called!" << std::endl;
+		return true;
+	}();
+
+	render_view->Release(); 
+	render_view = nullptr;
+	renderview_lost = true;
+
+	ImGui_ImplDX11_CreateDeviceObjects();
+
+	ImGui_ImplDX11_InvalidateDeviceObjects();
+
+	return pResizeBuffers(pChain, BufferCount, Width, Height, NewFormat, Flags);
+}
+
+void hook_dx11()
 {
 	D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_11_0;
 	DXGI_SWAP_CHAIN_DESC scd{};
@@ -668,14 +722,14 @@ LPVOID hook_dx11()
 
 	if (isBORDERLESS) {
 
-		std::cout << "this shit is borderless\n";
+		std::cout << __FUNCTION__ << " > this shit is borderless\n";
 		isWindowed = true;
 	}
 	else if (isFULLSCREEN_OR_WINDOWED) {
 		if (isFULLSCREEN)
-			std::cout << "this shit is fullscreen\n";
+			std::cout << __FUNCTION__ << " > this shit is fullscreen\n";
 		else {
-			std::cout << "this shit is windowed\n";
+			std::cout << __FUNCTION__ << " > this shit is windowed\n";
 			isWindowed = true;
 		}
 	}
@@ -684,28 +738,42 @@ LPVOID hook_dx11()
 	scd.BufferDesc.RefreshRate.Numerator = 60;
 	scd.BufferDesc.RefreshRate.Denominator = 1;
 
+	IDXGISwapChain* swapchain = nullptr;
+
 	if (FAILED(D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, NULL, &feature_level, 1, D3D11_SDK_VERSION, &scd, &swapchain, &device, NULL, &context)))
 	{
 		std::cout << "failed to create device\n";
-		return 0;
+		return;
 	}
 
 	void** vtable_swapchain = *(void***)swapchain;
 
-	LPVOID present_address = vtable_swapchain[8];
+	pPresentAddress = vtable_swapchain[8];
 
-	if (MH_CreateHook(present_address, &present_hooked, (LPVOID*)&pPresent) != MH_OK)
+	if (MH_CreateHook(pPresentAddress, &present_hooked, (LPVOID*)&pPresent) != MH_OK)
 	{
-		std::cout << "failed create hook\n";
-		return 0;
-	}
-	if (MH_EnableHook(present_address) != MH_OK)
-	{
-		std::cout << "failed enable hook\n";
-		return 0;
+		std::cout << __FUNCTION__ << " > failed create hook present\n";
+		return;
 	}
 
-	return present_address;
+	if (MH_EnableHook(pPresentAddress) != MH_OK)
+	{
+		std::cout << __FUNCTION__ << " > failed enable hook present\n";
+		return;
+	}
+
+	pResizeBuffersAddress = vtable_swapchain[13];
+
+	if (MH_CreateHook(pResizeBuffersAddress, &resizebuffers_hooked, (LPVOID*)&pResizeBuffers) != MH_OK)
+	{
+		std::cout << __FUNCTION__ << " > failed create hook resizebuffers\n";
+		return;
+	}
+
+	if (MH_EnableHook(pResizeBuffersAddress) != MH_OK)
+	{
+		std::cout << __FUNCTION__ << " > failed enable hook resizebuffers\n";
+	}
 }
 
 void hook_wndproc()
@@ -713,7 +781,7 @@ void hook_wndproc()
 	pWndProc = (WNDPROC)SetWindowLong(hwndGame, GWL_WNDPROC, (LONG_PTR)&wndproc_hooked);
 }
 
-void unhook_present(LPVOID address)
+void unhook(LPVOID address)
 {
 	MH_DisableHook(address);
 	MH_RemoveHook(address);
@@ -730,23 +798,29 @@ void hack_thread(HMODULE module)
 {
 	console::attach();
 	
-	std::cout << "attach success\n";
+	std::cout << __FUNCTION__ << " > attach success\n";
 
 	hwndGame = FindWindow(NULL, "Battlefield 3™");
 
 	if (hwndGame == NULL)
 	{
-		std::cout << __FUNCTION__ << " game window not found\n";
+		std::cout << __FUNCTION__ << " > game window not found\n";
 		FreeLibraryAndExitThread(module, 1);
 	}
 
 	MH_Initialize();
 
-	LPVOID present_address = hook_dx11();
+	hook_dx11();
 
-	if (present_address == NULL)
+	if (pPresentAddress == NULL)
 	{
-		std::cout << __FUNCTION__ << " failed hook dx11\n";
+		std::cout << __FUNCTION__ << " > failed hook dx11 present\n";
+		FreeLibraryAndExitThread(module, 1);
+	}
+
+	if (pResizeBuffers == NULL)
+	{
+		std::cout << __FUNCTION__ << " > failed hook dx11 resizebuffers\n";
 		FreeLibraryAndExitThread(module, 1);
 	}
 
@@ -763,13 +837,18 @@ void hack_thread(HMODULE module)
 		Sleep(100);
 	}
 
-	unhook_present(present_address);
+	unhook(pPresentAddress);
+
+	unhook(pResizeBuffersAddress);
+
+	render_view->Release();
+	render_view = nullptr;
 
 	unhook_wndproc();
 
 	MH_Uninitialize();
 
-	std::cout << __FUNCTION__ << " free library...\n";
+	std::cout << __FUNCTION__ << " > free library...\n";
 
 	FreeLibraryAndExitThread(module, 0);
 }
@@ -782,6 +861,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 	switch (ul_reason_for_call)
 	{
 	case DLL_PROCESS_ATTACH:
+		vars::load_default_settings();
 		CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)hack_thread, hModule, NULL, NULL);
 		break;
 	case DLL_THREAD_ATTACH:
