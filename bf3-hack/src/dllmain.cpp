@@ -48,6 +48,11 @@ namespace vars
 		float enemy_color[3];
 		float teammate_color[3];
 	}
+	namespace misc
+	{
+		bool rapid_fire;
+		bool no_recoil;
+	}
 	void load_default_settings()
 	{
 		visuals::enemy_color[0] = 1.f;
@@ -588,7 +593,55 @@ namespace functions
 	}
 	namespace misc
 	{
+		void rapid_fire(const bool is_enable)
+		{
+			static DWORD fire_count_instruction_address = NULL;
 
+			if (fire_count_instruction_address == NULL)
+			{
+				//D9 9E B8 00 00 00 8B 86
+				fire_count_instruction_address = memory_utils::find_pattern(memory_utils::get_base(), "\xD9\x9E\xB8\x00\x00\x00\x8B\x86", "xxxxxxxx");
+			}
+
+			if (is_enable)
+			{
+				//90 90 90 90 90 90
+				memory_utils::patch_instruction(fire_count_instruction_address, "\x90\x90\x90\x90\x90\x90", 6);
+			}
+			else
+			{
+				//D9 9E B8 00 00 00
+				memory_utils::patch_instruction(fire_count_instruction_address, "\xD9\x9E\xB8\x00\x00\x00", 6);
+			}
+		}
+
+		void no_recoil(const bool is_enable)
+		{
+			static DWORD recoil_pitch_instruction_address = NULL;
+			static DWORD recoil_yaw_instruction_address = NULL;
+
+			if (recoil_pitch_instruction_address == NULL || recoil_yaw_instruction_address == NULL)
+			{
+				//D9 9E AC 00 00 00 F3
+				//D9 9E B0 00 00 00 D9 44
+				recoil_pitch_instruction_address = memory_utils::find_pattern(memory_utils::get_base(), "\xD9\x9E\xAC\x00\x00\x00\xF3", "xxxxxxx");
+				recoil_yaw_instruction_address = memory_utils::find_pattern(memory_utils::get_base(), "\xD9\x9E\xB0\x00\x00\x00\xD9\x44", "xxxxxxxx");
+			}
+
+			if (is_enable)
+			{
+				//90 90 90 90 90 90
+				memory_utils::patch_instruction(recoil_pitch_instruction_address, "\x90\x90\x90\x90\x90\x90", 6);
+				memory_utils::patch_instruction(recoil_yaw_instruction_address, "\x90\x90\x90\x90\x90\x90", 6);
+			}
+			else
+			{
+				//D9 9E AC 00 00 00
+				//D9 9E B0 00 00 00
+				memory_utils::patch_instruction(recoil_pitch_instruction_address, "\xD9\x9E\xAC\x00\x00\x00", 6);
+				memory_utils::patch_instruction(recoil_yaw_instruction_address, "\xD9\x9E\xB0\x00\x00\x00", 6);
+			}
+		}
 	}
 	void run()
 	{
@@ -610,7 +663,8 @@ void begin_scene()
 	{
 		ImGui::GetIO().MouseDrawCursor = true;
 		ImGui::Begin("test", &vars::menu_open);
-		ImGui::BeginChild("visuals", ImVec2(), true);
+		ImGui::BeginChild("functions", ImVec2(), true);
+		ImGui::Text("Visuals:");
 		ImGui::Checkbox("Enable", &vars::visuals::enable);
 		ImGui::Checkbox("Teammates", &vars::visuals::teammates);
 		ImGui::Checkbox("Box", &vars::visuals::box);
@@ -618,6 +672,26 @@ void begin_scene()
 		ImGui::Checkbox("Health", &vars::visuals::health);
 		ImGui::ColorEdit3("Enemy color", vars::visuals::enemy_color);
 		ImGui::ColorEdit3("Teammate color", vars::visuals::teammate_color);
+		ImGui::Text("Misc:");
+
+		static bool isEnableNoRecoil = false;
+		std::string no_recoil_status = isEnableNoRecoil ? "Disable no recoil" : "Enable no recoil";
+		if (ImGui::Button(no_recoil_status.c_str()))
+		{
+			isEnableNoRecoil = !isEnableNoRecoil;
+			functions::misc::no_recoil(isEnableNoRecoil);
+		}
+
+		static bool isEnableRapidFire = false;
+		std::string rapid_fire_status = isEnableRapidFire ? "Disable rapid fire" : "Enable rapid fire";
+		if (ImGui::Button(rapid_fire_status.c_str()))
+		{
+			isEnableRapidFire = !isEnableRapidFire;
+			functions::misc::rapid_fire(isEnableRapidFire);
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Works like instant kill");
+
 		ImGui::EndChild();
 		ImGui::End();
 	}
@@ -794,6 +868,15 @@ void unhook_wndproc()
 	Sleep(100);
 }
 
+void shutdown_hacks()
+{
+	if (vars::misc::rapid_fire)
+		functions::misc::rapid_fire(false);
+
+	if (vars::misc::no_recoil)
+		functions::misc::no_recoil(false);
+}
+
 void hack_thread(HMODULE module)
 {
 	console::attach();
@@ -847,6 +930,8 @@ void hack_thread(HMODULE module)
 	unhook_wndproc();
 
 	MH_Uninitialize();
+
+	shutdown_hacks();
 
 	std::cout << __FUNCTION__ << " > free library...\n";
 
