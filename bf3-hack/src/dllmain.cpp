@@ -674,20 +674,18 @@ void begin_scene()
 		ImGui::ColorEdit3("Teammate color", vars::visuals::teammate_color);
 		ImGui::Text("Misc:");
 
-		static bool isEnableNoRecoil = false;
-		std::string no_recoil_status = isEnableNoRecoil ? "Disable no recoil" : "Enable no recoil";
+		std::string no_recoil_status = vars::misc::no_recoil ? "Disable no recoil" : "Enable no recoil";
 		if (ImGui::Button(no_recoil_status.c_str()))
 		{
-			isEnableNoRecoil = !isEnableNoRecoil;
-			functions::misc::no_recoil(isEnableNoRecoil);
+			vars::misc::no_recoil = !vars::misc::no_recoil;
+			functions::misc::no_recoil(vars::misc::no_recoil);
 		}
 
-		static bool isEnableRapidFire = false;
-		std::string rapid_fire_status = isEnableRapidFire ? "Disable rapid fire" : "Enable rapid fire";
+		std::string rapid_fire_status = vars::misc::rapid_fire ? "Disable rapid fire" : "Enable rapid fire";
 		if (ImGui::Button(rapid_fire_status.c_str()))
 		{
-			isEnableRapidFire = !isEnableRapidFire;
-			functions::misc::rapid_fire(isEnableRapidFire);
+			vars::misc::rapid_fire = !vars::misc::rapid_fire;
+			functions::misc::rapid_fire(vars::misc::rapid_fire);
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Works like instant kill");
