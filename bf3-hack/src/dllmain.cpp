@@ -34,6 +34,28 @@ ID3D11RenderTargetView* render_view = nullptr;
 
 static bool renderview_lost = true;
 
+enum IDXGISwapChainvTable //for dx10 / dx11
+{
+	QUERY_INTERFACE,
+	ADD_REF, 
+	RELEASE,
+	SET_PRIVATE_DATA,
+	SET_PRIVATE_DATA_INTERFACE,
+	GET_PRIVATE_DATA,
+	GET_PARENT,
+	GET_DEVICE,
+	PRESENT,
+	GET_BUFFER,
+	SET_FULLSCREEN_STATE,
+	GET_FULLSCREEN_STATE,
+	GET_DESC,
+	RESIZE_BUFFERS,
+	RESIZE_TARGET,
+	GET_CONTAINING_OUTPUT,
+	GET_FRAME_STATISTICS,
+	GET_LAST_PRESENT_COUNT
+};
+
 namespace vars
 {
 	bool unload_library;
@@ -119,7 +141,7 @@ namespace memory_utils
 		for (int i = 1; i < lengh_array + 1; i++)
 		{
 			if (is_valid_ptr((LPVOID)relative_address) == false)
-				return *static_cast<T*>(0);
+				return T();
 
 			if (i < lengh_array)
 				relative_address = *(DWORD_OF_BITNESS*)(relative_address + address[i]);
@@ -622,24 +644,19 @@ namespace functions
 
 			if (recoil_pitch_instruction_address == NULL || recoil_yaw_instruction_address == NULL)
 			{
-				//D9 9E AC 00 00 00 F3
-				//D9 9E B0 00 00 00 D9 44
 				recoil_pitch_instruction_address = memory_utils::find_pattern(memory_utils::get_base(), "\xD9\x9E\xAC\x00\x00\x00\xF3", "xxxxxxx");
-				recoil_yaw_instruction_address = memory_utils::find_pattern(memory_utils::get_base(), "\xD9\x9E\xB0\x00\x00\x00\xD9\x44", "xxxxxxxx");
+				recoil_yaw_instruction_address = memory_utils::find_pattern(memory_utils::get_base(), "\xD8\x86\xB0\x00\x00\x00\xD9", "xxxxxxx");
 			}
 
 			if (is_enable)
 			{
-				//90 90 90 90 90 90
 				memory_utils::patch_instruction(recoil_pitch_instruction_address, "\x90\x90\x90\x90\x90\x90", 6);
-				memory_utils::patch_instruction(recoil_yaw_instruction_address, "\x90\x90\x90\x90\x90\x90", 6);
+				memory_utils::patch_instruction(recoil_yaw_instruction_address, "\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90", 12);
 			}
 			else
 			{
-				//D9 9E AC 00 00 00
-				//D9 9E B0 00 00 00
 				memory_utils::patch_instruction(recoil_pitch_instruction_address, "\xD9\x9E\xAC\x00\x00\x00", 6);
-				memory_utils::patch_instruction(recoil_yaw_instruction_address, "\xD9\x9E\xB0\x00\x00\x00", 6);
+				memory_utils::patch_instruction(recoil_yaw_instruction_address, "\xD8\x86\xB0\x00\x00\x00\xD9\x9E\xB0\x00\x00\x00", 12);
 			}
 		}
 	}
@@ -820,7 +837,10 @@ void hook_dx11()
 
 	void** vtable_swapchain = *(void***)swapchain;
 
-	pPresentAddress = vtable_swapchain[8];
+	swapchain->Release();
+	swapchain = nullptr;
+
+	pPresentAddress = vtable_swapchain[IDXGISwapChainvTable::PRESENT];
 
 	if (MH_CreateHook(pPresentAddress, &present_hooked, (LPVOID*)&pPresent) != MH_OK)
 	{
@@ -834,7 +854,7 @@ void hook_dx11()
 		return;
 	}
 
-	pResizeBuffersAddress = vtable_swapchain[13];
+	pResizeBuffersAddress = vtable_swapchain[IDXGISwapChainvTable::RESIZE_BUFFERS];
 
 	if (MH_CreateHook(pResizeBuffersAddress, &resizebuffers_hooked, (LPVOID*)&pResizeBuffers) != MH_OK)
 	{
