@@ -705,7 +705,7 @@ void begin_scene()
 			functions::misc::rapid_fire(vars::misc::rapid_fire);
 		}
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Works like instant kill");
+			ImGui::SetTooltip("Works like instant kill on machine guns =))))");
 
 		ImGui::EndChild();
 		ImGui::End();
@@ -901,7 +901,7 @@ void hack_thread(HMODULE module)
 	
 	std::cout << __FUNCTION__ << " > attach success\n";
 
-	hwndGame = FindWindow(NULL, "Battlefield 3™");
+	hwndGame = FindWindow(NULL, "Battlefield 3â„¢");
 
 	if (hwndGame == NULL)
 	{
