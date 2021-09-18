@@ -1,3 +1,5 @@
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <Windows.h>
 #include <iostream>
 #include <vector>
@@ -895,13 +897,60 @@ void shutdown_hacks()
 		functions::misc::no_recoil(false);
 }
 
+struct find_window_s
+{
+	char* window_name;
+	HWND hWnd;
+};
+
+BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
+{
+	auto* window_inform_s = (find_window_s*)lParam;
+
+	if ((!GetWindow(hwnd, GW_OWNER)) && IsWindow(hwnd))
+	{
+		DWORD process_id = NULL;
+		GetWindowThreadProcessId(hwnd, &process_id);
+
+		char* text_window = new char[255];
+
+		GetWindowText(hwnd, text_window, 255);
+
+		if (GetCurrentProcessId() == process_id && strstr(text_window, window_inform_s->window_name) && !strstr(text_window, ".exe"))
+		{
+#ifdef ENABLE_DEBUG_CONSOLE
+			std::cout << "Window name: " << text_window << std::endl;
+#endif // ENABLE_DEBUG_CONSOLE
+			window_inform_s->hWnd = hwnd;
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
+HWND find_game_window(const char* psz_part_of_word_window_name)
+{
+	find_window_s window_inform_struct{};
+
+	window_inform_struct.window_name = new char[strlen(psz_part_of_word_window_name)];
+
+	strcpy(window_inform_struct.window_name, psz_part_of_word_window_name);
+
+	EnumWindows(EnumWindowsProc, (LPARAM)&window_inform_struct);
+
+	delete[] window_inform_struct.window_name;
+
+	return window_inform_struct.hWnd;
+}
+
 void hack_thread(HMODULE module)
 {
 	console::attach();
 	
 	std::cout << __FUNCTION__ << " > attach success\n";
 
-	hwndGame = FindWindow(NULL, "Battlefield 3™");
+	hwndGame = find_game_window("Battlefield");
 
 	if (hwndGame == NULL)
 	{
